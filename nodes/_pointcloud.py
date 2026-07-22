@@ -172,26 +172,35 @@ def parse_ply_bytes(data: bytes):
     fmt = None
     elements: list[dict] = []
     current = None
-    for line in header_text.splitlines():
-        parts = line.split()
-        if not parts or parts[0] in ("ply", "comment", "obj_info"):
-            continue
-        if parts[0] == "format":
-            if len(parts) < 2:
-                raise PointCloudError("malformed PLY: 'format' line missing value")
-            fmt = parts[1]
-        elif parts[0] == "element":
-            if len(parts) < 3:
-                raise PointCloudError("malformed PLY: 'element' line malformed")
-            current = {"name": parts[1], "count": int(parts[2]), "properties": []}
-            elements.append(current)
-        elif parts[0] == "property":
-            if current is None:
-                raise PointCloudError("malformed PLY: 'property' before any 'element'")
-            if parts[1] == "list":
-                current["properties"].append(("list", parts[2], parts[3], parts[4]))
-            else:
-                current["properties"].append(("scalar", parts[1], parts[2]))
+    try:
+        for line in header_text.splitlines():
+            parts = line.split()
+            if not parts or parts[0] in ("ply", "comment", "obj_info"):
+                continue
+            if parts[0] == "format":
+                if len(parts) < 2:
+                    raise PointCloudError("malformed PLY: 'format' line missing value")
+                fmt = parts[1]
+            elif parts[0] == "element":
+                if len(parts) < 3:
+                    raise PointCloudError("malformed PLY: 'element' line malformed")
+                current = {"name": parts[1], "count": int(parts[2]), "properties": []}
+                elements.append(current)
+            elif parts[0] == "property":
+                if current is None:
+                    raise PointCloudError("malformed PLY: 'property' before any 'element'")
+                if parts[1] == "list":
+                    if len(parts) < 5:
+                        raise PointCloudError("malformed PLY: 'property list' line malformed")
+                    current["properties"].append(("list", parts[2], parts[3], parts[4]))
+                else:
+                    if len(parts) < 3:
+                        raise PointCloudError("malformed PLY: 'property' line malformed")
+                    current["properties"].append(("scalar", parts[1], parts[2]))
+    except PointCloudError:
+        raise
+    except (ValueError, IndexError) as exc:
+        raise PointCloudError(f"malformed PLY header: {exc}") from exc
 
     if fmt is None:
         raise PointCloudError("malformed PLY: no 'format' line")
@@ -224,7 +233,10 @@ def parse_ply_bytes(data: bytes):
         for row in rows:
             if len(row) < len(prop_names):
                 raise PointCloudError("malformed PLY: vertex row has fewer values than declared properties")
-        cols = [[float(row[i]) for row in rows] for i in range(len(prop_names))]
+        try:
+            cols = [[float(row[i]) for row in rows] for i in range(len(prop_names))]
+        except ValueError as exc:
+            raise PointCloudError(f"malformed PLY: non-numeric vertex value: {exc}") from exc
     else:
         if fmt == "binary_little_endian":
             endian = "<"
@@ -302,23 +314,32 @@ def parse_pcd_bytes(data: bytes):
     counts = None
     n_points = None
     data_mode = None
-    for line in header_text.splitlines():
-        parts = line.split()
-        if not parts:
-            continue
-        key = parts[0].upper()
-        if key == "FIELDS":
-            fields = parts[1:]
-        elif key == "SIZE":
-            sizes = [int(v) for v in parts[1:]]
-        elif key == "TYPE":
-            types = parts[1:]
-        elif key == "COUNT":
-            counts = [int(v) for v in parts[1:]]
-        elif key == "POINTS":
-            n_points = int(parts[1])
-        elif key == "DATA":
-            data_mode = parts[1].lower()
+    try:
+        for line in header_text.splitlines():
+            parts = line.split()
+            if not parts:
+                continue
+            key = parts[0].upper()
+            if key == "FIELDS":
+                fields = parts[1:]
+            elif key == "SIZE":
+                sizes = [int(v) for v in parts[1:]]
+            elif key == "TYPE":
+                types = parts[1:]
+            elif key == "COUNT":
+                counts = [int(v) for v in parts[1:]]
+            elif key == "POINTS":
+                if len(parts) < 2:
+                    raise PointCloudError("malformed PCD: 'POINTS' line missing value")
+                n_points = int(parts[1])
+            elif key == "DATA":
+                if len(parts) < 2:
+                    raise PointCloudError("malformed PCD: 'DATA' line missing value")
+                data_mode = parts[1].lower()
+    except PointCloudError:
+        raise
+    except (ValueError, IndexError) as exc:
+        raise PointCloudError(f"malformed PCD header: {exc}") from exc
 
     if fields is None or sizes is None or types is None:
         raise PointCloudError("malformed PCD: missing FIELDS/SIZE/TYPE header lines")
@@ -340,6 +361,11 @@ def parse_pcd_bytes(data: bytes):
     for req in ("x", "y", "z"):
         if req not in fields:
             raise PointCloudError(f"malformed PCD: FIELDS missing '{req}'")
+    if not (len(fields) == len(sizes) == len(types)):
+        raise PointCloudError(
+            f"malformed PCD: FIELDS ({len(fields)}), SIZE ({len(sizes)}), and TYPE ({len(types)}) "
+            "must declare the same number of columns"
+        )
 
     if data_mode == "ascii":
         text = body.decode("ascii", errors="replace")
@@ -350,7 +376,10 @@ def parse_pcd_bytes(data: bytes):
         for row in rows:
             if len(row) < len(fields):
                 raise PointCloudError("malformed PCD: point row has fewer values than declared fields")
-        cols = {f: np.array([float(row[i]) for row in rows], dtype=np.float64) for i, f in enumerate(fields)}
+        try:
+            cols = {f: np.array([float(row[i]) for row in rows], dtype=np.float64) for i, f in enumerate(fields)}
+        except ValueError as exc:
+            raise PointCloudError(f"malformed PCD: non-numeric point value: {exc}") from exc
     else:
         fmt_chars = []
         for name, size in zip(types, sizes):
