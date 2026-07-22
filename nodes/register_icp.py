@@ -46,6 +46,16 @@ def register_icp(ax: AxiomContext, input: ICPInput) -> ICPOutput:
     pc_fix = ICPPointCloud(target, columns=["x", "y", "z"])
     pc_mov = ICPPointCloud(source_pre, columns=["x", "y", "z"])
 
+    # simpleicp's normal-estimation step queries each cloud's own k-d tree for
+    # `neighbors` nearest neighbors (default 10). When a cloud has fewer than
+    # `neighbors` points, scipy's cKDTree pads missing neighbors with an
+    # out-of-range sentinel index equal to the tree size, which simpleicp then
+    # indexes into directly — an unhandled IndexError. Clamp to the smaller
+    # cloud's point count (minus 1, since a point is its own first neighbor)
+    # so every requested neighbor index is always valid. Floor of 3 matches
+    # the minimum needed to fit a local plane via PCA.
+    neighbors = max(3, min(10, len(source_pre) - 1, len(target) - 1))
+
     icp = SimpleICP()
     icp.add_point_clouds(pc_fix, pc_mov)
     try:
@@ -54,6 +64,7 @@ def register_icp(ax: AxiomContext, input: ICPInput) -> ICPOutput:
             H_icp, _, _, distance_residuals = icp.run(
                 max_iterations=max_iter,
                 min_change=tolerance,
+                neighbors=neighbors,
             )
     except SimpleICPException as exc:
         raise PointCloudError(f"ICP failed to converge: {exc}") from exc

@@ -1,5 +1,5 @@
 name: christiangeorgelucas/open3d-tools
-version: 0.1.0
+version: 0.1.1
 language: python
 description: >-
   Composable Axiom point-cloud-processing nodes (parse, downsample, estimate
