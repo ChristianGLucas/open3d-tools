@@ -1,0 +1,350 @@
+// This file defines the data contracts (messages) for your Axiom package.
+// Every node's --input and --output refers to a message defined here.
+//
+// Run `axiom create message <Name>` to scaffold a new message below.
+// Run `axiom generate` to compile these definitions into language bindings in gen/.
+//
+// DOCUMENTATION
+//   Comments written directly above a message or field declaration are extracted
+//   automatically at publish time and shown in the Axiom registry as documentation.
+//   Write your descriptions there — no separate doc files needed.
+//
+//   Leading comment  (no blank line before the declaration) → registry description ✓
+//   Detached comment (blank line before the declaration)    → ignored by registry  ✗
+//
+// This file is yours to edit. Axiom only appends new message blocks — it never
+// overwrites or removes content you have written.
+
+syntax = "proto3";
+
+package christiangeorgelucas.open3d_tools;
+
+// A single point or vector in 3D space. Field names match the `Point3` used
+// by christiangeorgelucas/mesh-tools (a likely flow neighbor — a
+// reconstructed point-cloud surface commonly feeds mesh-tools' inspection
+// nodes) so the two packages compose without a renaming adapter.
+message Point3 {
+  double x = 1;
+  double y = 2;
+  double z = 3;
+}
+
+// The canonical in-flight point cloud. Every node that returns a point cloud
+// returns this; every node that consumes one accepts it as its `cloud`
+// field. On output, `points` and `point_count` are always populated;
+// `colors`/`normals` are populated only when the cloud actually carries
+// them. `source_data`/`format` are INPUT-ONLY convenience: when `points` is
+// empty and `source_data` is set, a node parses the cloud from the raw file
+// bytes first — so any node can start a flow (given file bytes) or sit in
+// the middle (receiving `points` from upstream).
+message PointCloud {
+  // The points, in caller/world coordinates.
+  repeated Point3 points = 1;
+  // Per-point RGB color, each channel in [0, 1]. Empty if the cloud carries
+  // no color. When present, has exactly one entry per point (same length as
+  // `points`, same order).
+  repeated Point3 colors = 2;
+  // Per-point unit surface normal. Empty if the cloud carries no normals.
+  // When present, has exactly one entry per point (same length as `points`,
+  // same order).
+  repeated Point3 normals = 3;
+  // INPUT-ONLY. Raw point-cloud file bytes (base64-encoded over the JSON
+  // bridge) in PLY, PCD, or XYZ format. Parsed when `points` is empty. See
+  // `format`.
+  bytes source_data = 4;
+  // Format of `source_data`: "PLY", "PCD", or "XYZ" (case-insensitive).
+  // Required when `source_data` is set and `points` is empty.
+  string format = 5;
+  // Point count. Always populated on output; ignored on input.
+  int32 point_count = 6;
+}
+
+// Output of GetPointCloudInfo — a structural summary of a point cloud.
+message PointCloudInfoOutput {
+  int32 point_count = 1;
+  bool has_colors = 2;
+  bool has_normals = 3;
+  // Axis-aligned bounding box.
+  Point3 bounds_min = 4;
+  Point3 bounds_max = 5;
+  Point3 centroid = 6;
+}
+
+// Input for VoxelDownsample.
+message VoxelDownsampleInput {
+  PointCloud cloud = 1;
+  // Edge length of each voxel. Points falling in the same voxel are merged
+  // into a single point (the mean of their coordinates, and of their
+  // colors/normals if present). Must be > 0.
+  double voxel_size = 2;
+}
+
+// Downsampling method for DownsampleToCount.
+enum DownsampleMethod {
+  UNIFORM = 0;
+  RANDOM = 1;
+}
+
+// Input for DownsampleToCount.
+message DownsampleToCountInput {
+  PointCloud cloud = 1;
+  // Target number of points. Clamped to [1, input point count].
+  int32 target_count = 2;
+  DownsampleMethod method = 3;
+  // Seed for RANDOM method. Ignored for UNIFORM (which is already
+  // deterministic — an evenly-spaced stride over the input order).
+  int64 seed = 4;
+}
+
+// Input for EstimateNormals.
+message EstimateNormalsInput {
+  PointCloud cloud = 1;
+  // Number of nearest neighbors used to fit each point's local tangent
+  // plane (PCA). Must be >= 3. Ignored if `radius` > 0.
+  int32 k_neighbors = 2;
+  // If > 0, use all neighbors within this radius instead of a fixed k.
+  double radius = 3;
+}
+
+// Input for RemoveStatisticalOutliers.
+message StatisticalOutlierInput {
+  PointCloud cloud = 1;
+  // Number of nearest neighbors averaged per point. Must be >= 1.
+  int32 nb_neighbors = 2;
+  // A point is an outlier if its mean neighbor distance exceeds
+  // (global mean + std_ratio * global std-dev). Must be > 0.
+  double std_ratio = 3;
+}
+
+// Input for RemoveRadiusOutliers.
+message RadiusOutlierInput {
+  PointCloud cloud = 1;
+  // Search radius. Must be > 0.
+  double radius = 2;
+  // A point is an outlier if it has fewer than this many neighbors
+  // (excluding itself) within `radius`.
+  int32 min_neighbors = 3;
+}
+
+// Output shared by RemoveStatisticalOutliers / RemoveRadiusOutliers.
+message OutlierRemovalOutput {
+  PointCloud cloud = 1;
+  int32 removed_count = 2;
+}
+
+// Input for SegmentPlaneRANSAC.
+message SegmentPlaneInput {
+  PointCloud cloud = 1;
+  // Max distance from the plane for a point to count as an inlier. Must be > 0.
+  double distance_threshold = 2;
+  // RANSAC iteration cap. Clamped to [1, 10000]; defaults to 1000 if <= 0.
+  int32 max_iterations = 3;
+  // Deterministic RANSAC seed.
+  int64 seed = 4;
+}
+
+// Output of SegmentPlaneRANSAC. The plane is ax + by + cz + d = 0, with
+// (a, b, c) a unit normal.
+message SegmentPlaneOutput {
+  double a = 1;
+  double b = 2;
+  double c = 3;
+  double d = 4;
+  // Indices (into the input cloud's `points`) of the inlier points.
+  repeated int32 inlier_indices = 5;
+  int32 inlier_count = 6;
+}
+
+// Input for ClusterDBSCAN.
+message ClusterDBSCANInput {
+  PointCloud cloud = 1;
+  // Maximum neighbor distance for two points to be in the same
+  // neighborhood. Must be > 0.
+  double eps = 2;
+  // Minimum neighborhood size (including the point itself) to seed a
+  // cluster. Must be >= 1.
+  int32 min_points = 3;
+}
+
+// Output of ClusterDBSCAN.
+message ClusterDBSCANOutput {
+  // One label per input point, same order. -1 means "noise" (not assigned
+  // to any cluster), matching scikit-learn's DBSCAN convention.
+  repeated int32 labels = 1;
+  // Number of clusters found (excludes noise).
+  int32 n_clusters = 2;
+  int32 n_noise = 3;
+}
+
+// Output of ComputeBoundingBox — both the axis-aligned and the
+// (PCA-oriented) minimum-fit oriented bounding box.
+message BoundingBoxOutput {
+  Point3 aabb_min = 1;
+  Point3 aabb_max = 2;
+  Point3 aabb_extents = 3;
+  double aabb_volume = 4;
+  // Oriented bounding box, fit via PCA on the point coordinates.
+  Point3 obb_center = 5;
+  // Row-major 3x3 rotation matrix mapping OBB-local axes to world axes
+  // (9 values: [r00, r01, r02, r10, r11, r12, r20, r21, r22]).
+  repeated double obb_rotation = 6;
+  Point3 obb_extents = 7;
+  double obb_volume = 8;
+}
+
+// Output of ComputeConvexHull — the convex hull of the raw points
+// (distinct from mesh-tools' ComputeConvexHull, which hulls an existing
+// triangle mesh; this hulls an unstructured point set).
+message ConvexHullOutput {
+  // Hull vertices (a subset of the input points).
+  repeated Point3 hull_points = 1;
+  // Triangulated hull faces, as flattened index triples into `hull_points`
+  // (length is always a multiple of 3).
+  repeated int32 hull_face_indices = 2;
+  double volume = 3;
+  double area = 4;
+}
+
+// Input for RegisterICP.
+message ICPInput {
+  PointCloud source = 1;
+  PointCloud target = 2;
+  // Row-major 4x4 initial transform (16 values) applied to `source` before
+  // iterating. Identity if empty.
+  repeated double initial_transform = 3;
+  // Iteration cap. Clamped to [1, 200]; defaults to 100 if <= 0.
+  int32 max_iterations = 4;
+  // Convergence threshold: iteration stops once the mean and std-dev of
+  // point-to-plane correspondence distances change by less than this many
+  // percent between iterations. Defaults to 1.0 (%) if <= 0.
+  double tolerance = 5;
+  // Max nearest-neighbor distance for a point to count as an inlier when
+  // computing the reported `fitness`/`inlier_rmse` (measured independently
+  // of the optimizer, via nearest-neighbor search after the final
+  // transform is applied). Defaults to 5% of the target cloud's
+  // axis-aligned bounding-box diagonal if <= 0.
+  double max_correspondence_distance = 6;
+}
+
+// Output of RegisterICP.
+message ICPOutput {
+  // Row-major 4x4 transform (16 values) that best aligns `source` onto
+  // `target` (i.e. applying this to `source` minimizes point-to-point
+  // distance to `target`).
+  repeated double transform = 1;
+  // Fraction of source points with a correspondence within the final
+  // inlier threshold, in [0, 1].
+  double fitness = 2;
+  // RMSE of inlier point-to-point correspondence distances.
+  double inlier_rmse = 3;
+  int32 iterations_used = 4;
+}
+
+// Input for ComputePointCloudDistance.
+message PointCloudDistanceInput {
+  PointCloud source = 1;
+  PointCloud target = 2;
+}
+
+// Output of ComputePointCloudDistance — nearest-neighbor distance from each
+// `source` point to the closest point in `target`.
+message PointCloudDistanceOutput {
+  repeated double distances = 1;
+  double mean_distance = 2;
+  double min_distance = 3;
+  double max_distance = 4;
+}
+
+// Input for TransformPointCloud.
+message TransformPointCloudInput {
+  PointCloud cloud = 1;
+  // Row-major 4x4 homogeneous transform (16 values).
+  repeated double transform = 2;
+}
+
+// Input for CropPointCloud.
+message CropPointCloudInput {
+  PointCloud cloud = 1;
+  // Axis-aligned crop box; a point is kept iff min <= point <= max on every axis.
+  Point3 min = 2;
+  Point3 max = 3;
+}
+
+// Input for EstimatePointDensity.
+message PointDensityInput {
+  PointCloud cloud = 1;
+  // Number of nearest neighbors averaged per point. Must be >= 1.
+  int32 k_neighbors = 2;
+}
+
+// Output of EstimatePointDensity.
+message PointDensityOutput {
+  // Mean distance from each point to its nearest neighbor.
+  double mean_nn_distance = 1;
+  // Points per unit volume of the cloud's axis-aligned bounding box.
+  double points_per_unit_volume = 2;
+  double bbox_volume = 3;
+}
+
+// Input for ReconstructSurface.
+message ReconstructSurfaceInput {
+  PointCloud cloud = 1;
+}
+
+// Output of ReconstructSurface — a 2.5D Delaunay height-field
+// reconstruction: the points are triangulated by their projection onto the
+// best-fit plane (found via PCA), then lifted back to 3D. This models
+// terrain, single-view depth-camera scans, and any cloud that is a
+// function over a dominant plane; it is NOT a general watertight
+// reconstruction like Poisson/ball-pivoting (both need a library this
+// package's license gate rejects — see the retrospective) and will
+// self-intersect / lose detail on a fully closed 3D surface (e.g. a sphere
+// scanned from all sides).
+message ReconstructSurfaceOutput {
+  // Reconstructed mesh, PLY-encoded — byte-for-byte compatible with
+  // mesh-tools' `Mesh.data`/`format` fields (format is always "PLY").
+  bytes mesh_data = 1;
+  string mesh_format = 2;
+  int32 vertex_count = 3;
+  int32 face_count = 4;
+  double surface_area = 5;
+}
+
+// Input for VoxelizeOccupancyGrid.
+message VoxelizeInput {
+  PointCloud cloud = 1;
+  // Edge length of each voxel. Must be > 0.
+  double voxel_size = 2;
+}
+
+// Output of VoxelizeOccupancyGrid — a summary of the occupancy grid (not
+// the full grid, to stay within the transport size cap).
+message VoxelizeOutput {
+  int32 occupied_voxel_count = 1;
+  int32 grid_dim_x = 2;
+  int32 grid_dim_y = 3;
+  int32 grid_dim_z = 4;
+  Point3 grid_origin = 5;
+}
+
+// Input for ComputeGeometricFeatures.
+message GeometricFeaturesInput {
+  PointCloud cloud = 1;
+  // Number of nearest neighbors used for each point's local PCA. Must be >= 3.
+  int32 k_neighbors = 2;
+}
+
+// Output of ComputeGeometricFeatures — per-point local-shape descriptors
+// derived from the eigenvalues (lambda0 >= lambda1 >= lambda2 >= 0) of each
+// point's k-neighborhood covariance matrix (Weinmann et al.). One entry per
+// input point, same order.
+message GeometricFeaturesOutput {
+  // (lambda0 - lambda1) / lambda0 — high for points on a line/edge.
+  repeated double linearity = 1;
+  // (lambda1 - lambda2) / lambda0 — high for points on a flat surface.
+  repeated double planarity = 2;
+  // lambda2 / lambda0 — high for points in an isotropic/noisy neighborhood.
+  repeated double sphericity = 3;
+  // lambda2 / (lambda0 + lambda1 + lambda2) — surface variation / curvature.
+  repeated double curvature = 4;
+}

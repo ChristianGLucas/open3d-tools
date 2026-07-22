@@ -1,0 +1,141 @@
+name: christiangeorgelucas/open3d-tools
+version: 0.1.0
+language: python
+description: >-
+  Composable Axiom point-cloud-processing nodes (parse, downsample, estimate
+  normals, remove outliers, RANSAC plane segmentation, DBSCAN clustering,
+  bounding boxes, convex hull, ICP registration, distance, transform, crop,
+  density, 2.5D surface reconstruction, voxelize, per-point geometric
+  features) over a single PointCloud envelope. Composes small, individually
+  permissive, Eigen-free libraries (numpy/scipy/scikit-learn BSD-3-Clause,
+  pyransac3d Apache-2.0, simpleicp MIT) rather than Open3D/PCL, both of
+  which statically link Eigen (MPL-2.0, and LGPL for the SimplicialCholesky
+  module Open3D uses) — see the package retrospective.
+nodes:
+    - name: GetPointCloudInfo
+      input: PointCloud
+      output: PointCloudInfoOutput
+      description: >-
+        Parse a point cloud (from an inline point array or PLY/PCD/XYZ file
+        bytes) and report a structural summary: point count, whether colors
+        and/or normals are present, axis-aligned bounding box, and centroid.
+    - name: VoxelDownsample
+      input: VoxelDownsampleInput
+      output: PointCloud
+      description: >-
+        Reduce a point cloud by merging all points that fall in the same
+        voxel-size grid cell into one point (the mean of their
+        coordinates/colors/normals). The key data-reduction node for dense
+        scans.
+    - name: DownsampleToCount
+      input: DownsampleToCountInput
+      output: PointCloud
+      description: >-
+        Downsample a point cloud to an exact target point count, either by
+        an evenly-spaced deterministic stride (UNIFORM) or by a seeded
+        random sample without replacement (RANDOM).
+    - name: EstimateNormals
+      input: EstimateNormalsInput
+      output: PointCloud
+      description: >-
+        Estimate a per-point unit surface normal via PCA on each point's
+        k-nearest (or radius) neighborhood — the smallest-eigenvalue
+        eigenvector of the local covariance matrix.
+    - name: RemoveStatisticalOutliers
+      input: StatisticalOutlierInput
+      output: OutlierRemovalOutput
+      description: >-
+        Remove points whose mean distance to their nb_neighbors nearest
+        neighbors exceeds (global mean + std_ratio * global std-dev) —
+        sparse-noise removal. Returns the cleaned cloud and how many points
+        were removed.
+    - name: RemoveRadiusOutliers
+      input: RadiusOutlierInput
+      output: OutlierRemovalOutput
+      description: >-
+        Remove points with fewer than min_neighbors other points within a
+        given radius. Returns the cleaned cloud and how many points were
+        removed.
+    - name: SegmentPlaneRANSAC
+      input: SegmentPlaneInput
+      output: SegmentPlaneOutput
+      description: >-
+        Segment the single dominant plane in a point cloud via seeded RANSAC
+        — the "find the floor/wall/table" node. Returns the plane
+        coefficients (ax + by + cz + d = 0) and the indices of the inlier
+        points.
+    - name: ClusterDBSCAN
+      input: ClusterDBSCANInput
+      output: ClusterDBSCANOutput
+      description: >-
+        Cluster points by density using DBSCAN (eps neighborhood radius,
+        min_points to seed a cluster). Returns a per-point cluster label
+        (-1 = noise) and the number of clusters found.
+    - name: ComputeBoundingBox
+      input: PointCloud
+      output: BoundingBoxOutput
+      description: >-
+        Compute both the axis-aligned bounding box and a PCA-oriented
+        (minimum-fit) bounding box of a point cloud.
+    - name: ComputeConvexHull
+      input: PointCloud
+      output: ConvexHullOutput
+      description: >-
+        Compute the 3D convex hull of a raw, unstructured point cloud
+        (distinct from mesh-tools' ComputeConvexHull, which hulls an
+        existing triangle mesh). Returns the hull's vertices, triangulated
+        faces, volume, and surface area.
+    - name: RegisterICP
+      input: ICPInput
+      output: ICPOutput
+      description: >-
+        Align a source point cloud onto a target via Iterative Closest
+        Point registration — the flagship scan-alignment node. Returns the
+        4x4 rigid transform, fitness (fraction of inliers), and inlier
+        RMSE. Bounded by max_iterations so it always returns.
+    - name: ComputePointCloudDistance
+      input: PointCloudDistanceInput
+      output: PointCloudDistanceOutput
+      description: >-
+        Compute, for every point in a source cloud, its nearest-neighbor
+        distance to a target cloud. Returns the per-point distances plus
+        mean/min/max.
+    - name: TransformPointCloud
+      input: TransformPointCloudInput
+      output: PointCloud
+      description: >-
+        Apply a caller-supplied 4x4 homogeneous transform (rotate/
+        translate/scale) to every point (and normal, rotation-only) in a
+        cloud.
+    - name: CropPointCloud
+      input: CropPointCloudInput
+      output: PointCloud
+      description: Keep only the points of a cloud that fall within an axis-aligned box.
+    - name: EstimatePointDensity
+      input: PointDensityInput
+      output: PointDensityOutput
+      description: >-
+        Estimate point-cloud density: mean nearest-neighbor distance and
+        points per unit volume of the cloud's bounding box.
+    - name: ReconstructSurface
+      input: ReconstructSurfaceInput
+      output: ReconstructSurfaceOutput
+      description: >-
+        Reconstruct a mesh from a point cloud via 2.5D Delaunay
+        triangulation over the cloud's best-fit (PCA) plane — models
+        terrain / single-view depth scans. Returns a PLY-encoded mesh
+        compatible with mesh-tools' Mesh envelope.
+    - name: VoxelizeOccupancyGrid
+      input: VoxelizeInput
+      output: VoxelizeOutput
+      description: >-
+        Voxelize a point cloud into an occupancy grid and report its
+        summary (occupied voxel count, per-axis grid dimensions, grid
+        origin) — bounded well under the transport size cap.
+    - name: ComputeGeometricFeatures
+      input: GeometricFeaturesInput
+      output: GeometricFeaturesOutput
+      description: >-
+        Compute per-point local-shape descriptors (linearity, planarity,
+        sphericity, curvature) from the eigenvalues of each point's
+        k-neighborhood covariance matrix.

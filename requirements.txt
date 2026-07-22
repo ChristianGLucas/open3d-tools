@@ -1,0 +1,22 @@
+# Pinned for deterministic builds. All permissive licenses, verified from
+# source (see nodes/_pointcloud.py header + the package retrospective).
+#
+# Open3D (the area's obvious reference library) was evaluated and REJECTED
+# at the license-selection gate: every Open3D wheel statically links Eigen,
+# which is MPL-2.0 (and, for the SimplicialCholesky module Open3D actually
+# uses, LGPL unless built with -DEIGEN_MPL2_ONLY) — both explicitly
+# disqualifying under this package's copyleft-anywhere-in-the-tree rule.
+# The Point Cloud Library (PCL) has the same Eigen dependency and is
+# excluded for the same reason. Instead this package composes small,
+# individually-permissive, Eigen-free libraries — see below.
+numpy==2.5.1
+scipy==1.18.0
+scikit-learn==1.8.0
+# Apache-2.0. Owns the RANSAC plane-segmentation algorithm.
+pyransac3d==0.6.0
+# MIT. Owns the ICP (point-to-point / point-to-plane) registration algorithm.
+simpleicp==2.0.15
+# simpleicp's own runtime deps (all permissive; pinned transitively for a
+# reproducible build):
+lmfit==1.3.4
+pandas==2.3.3
