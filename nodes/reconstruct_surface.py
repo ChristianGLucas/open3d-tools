@@ -6,13 +6,6 @@ from gen.messages_pb2 import ReconstructSurfaceInput, ReconstructSurfaceOutput
 from gen.axiom_context import AxiomContext
 from nodes._pointcloud import load_point_cloud, encode_ply_ascii, PointCloudError
 
-# ReconstructSurface's output (vertices + triangle faces, ASCII-PLY-encoded)
-# must stay well under the ~4 MiB transport cap. A stricter, node-specific
-# input cap keeps that true with margin (see the module docstring in
-# _pointcloud.py for the shared MAX_POINTS rationale) -- callers with a
-# larger scan should downsample first via VoxelDownsample/DownsampleToCount.
-_MAX_RECONSTRUCT_POINTS = 20_000
-
 
 def reconstruct_surface(ax: AxiomContext, input: ReconstructSurfaceInput) -> ReconstructSurfaceOutput:
     """Reconstruct a mesh from a point cloud via 2.5D Delaunay triangulation
@@ -26,11 +19,6 @@ def reconstruct_surface(ax: AxiomContext, input: ReconstructSurfaceInput) -> Rec
     points, _, _ = load_point_cloud(input.cloud)
     if len(points) < 3:
         raise PointCloudError("at least 3 points are required for surface reconstruction")
-    if len(points) > _MAX_RECONSTRUCT_POINTS:
-        raise PointCloudError(
-            f"point cloud too large for surface reconstruction: {len(points)} points "
-            f"(max {_MAX_RECONSTRUCT_POINTS}; downsample first with VoxelDownsample or DownsampleToCount)"
-        )
 
     center = points.mean(axis=0)
     centered = points - center

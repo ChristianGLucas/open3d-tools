@@ -1,6 +1,5 @@
 """Shared point-cloud helpers: canonical `PointCloud` message <-> numpy
-arrays, file parsing (PLY/PCD/XYZ), and the size/count caps that bound cost
-on untrusted input.
+arrays and file parsing (PLY/PCD/XYZ).
 
 LICENSE NOTE — why this package does not wrap Open3D or PCL
 -------------------------------------------------------------
@@ -37,21 +36,6 @@ from typing import Optional
 import numpy as np
 from scipy.spatial import cKDTree
 
-# ---------------------------------------------------------------------------
-# Safety caps (input-surface bounds; see the package retrospective).
-# ---------------------------------------------------------------------------
-
-# Hard cap on parsed point count. Well under the ~1-2M "dense scan" ceiling
-# mentioned as an example upper bound — chosen instead so that a PointCloud
-# message carrying points + colors + normals together (3 parallel Point3
-# arrays) stays comfortably under the ~4 MiB platform transport cap even in
-# the worst case (all three populated).
-MAX_POINTS = 100_000
-
-# Hard cap on raw `source_data` file bytes, checked before parsing (defense
-# in depth on top of the platform's own message-size limit).
-MAX_SOURCE_BYTES = 8 * 1024 * 1024
-
 
 class PointCloudError(ValueError):
     """Malformed/oversized point-cloud input. Raising this (a ValueError
@@ -66,7 +50,7 @@ class PointCloudError(ValueError):
 def load_point_cloud(pc) -> tuple[np.ndarray, Optional[np.ndarray], Optional[np.ndarray]]:
     """Decode a `PointCloud` message into (points, colors, normals) numpy
     arrays (colors/normals are `None` if absent). Raises `PointCloudError`
-    on missing/malformed/oversized input. Enforces `MAX_POINTS`."""
+    on missing/malformed input."""
     if len(pc.points) > 0:
         points = np.array([[p.x, p.y, p.z] for p in pc.points], dtype=np.float64)
         colors = (
@@ -88,10 +72,6 @@ def load_point_cloud(pc) -> tuple[np.ndarray, Optional[np.ndarray], Optional[np.
                 f"normals length ({len(normals)}) must match points length ({len(points)})"
             )
     elif pc.source_data:
-        if len(pc.source_data) > MAX_SOURCE_BYTES:
-            raise PointCloudError(
-                f"source_data too large: {len(pc.source_data)} bytes (max {MAX_SOURCE_BYTES})"
-            )
         fmt = (pc.format or "").strip().upper()
         if fmt == "PLY":
             points, colors, normals = parse_ply_bytes(pc.source_data)
@@ -108,8 +88,6 @@ def load_point_cloud(pc) -> tuple[np.ndarray, Optional[np.ndarray], Optional[np.
 
     if len(points) == 0:
         raise PointCloudError("point cloud is empty")
-    if len(points) > MAX_POINTS:
-        raise PointCloudError(f"point cloud too large: {len(points)} points (max {MAX_POINTS})")
     if not np.all(np.isfinite(points)):
         raise PointCloudError("point cloud contains non-finite coordinates (NaN/Inf)")
     return points, colors, normals
@@ -209,8 +187,8 @@ def parse_ply_bytes(data: bytes):
 
     vertex_el = elements[0]
     count = vertex_el["count"]
-    if count < 0 or count > MAX_POINTS:
-        raise PointCloudError(f"PLY vertex count too large or invalid: {count} (max {MAX_POINTS})")
+    if count < 0:
+        raise PointCloudError(f"PLY vertex count invalid: {count}")
     props = vertex_el["properties"]
     if any(p[0] == "list" for p in props):
         raise PointCloudError("unsupported PLY: list property in 'vertex' element")
@@ -349,8 +327,8 @@ def parse_pcd_bytes(data: bytes):
         raise PointCloudError("unsupported PCD: multi-value (COUNT != 1) fields are not supported")
     if n_points is None:
         raise PointCloudError("malformed PCD: missing POINTS header line")
-    if n_points < 0 or n_points > MAX_POINTS:
-        raise PointCloudError(f"PCD point count too large or invalid: {n_points} (max {MAX_POINTS})")
+    if n_points < 0:
+        raise PointCloudError(f"PCD point count invalid: {n_points}")
     if data_mode is None:
         raise PointCloudError("malformed PCD: missing DATA line")
     if data_mode == "binary_compressed":
@@ -443,8 +421,6 @@ def parse_xyz_bytes(data: bytes):
             points.append([float(tokens[0]), float(tokens[1]), float(tokens[2])])
         except ValueError as exc:
             raise PointCloudError(f"malformed XYZ at line {lineno}: {exc}") from exc
-        if len(points) > MAX_POINTS:
-            raise PointCloudError(f"point cloud too large: > {MAX_POINTS} points (max {MAX_POINTS})")
     if not points:
         raise PointCloudError("XYZ file contains no points")
     return np.array(points, dtype=np.float64), None, None
